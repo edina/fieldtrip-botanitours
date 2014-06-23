@@ -56,6 +56,25 @@ define(['utils'], function(utils){
                     }
                 );
             });
+            // db.transaction(function(tx) {
+            //     console.log("jings");
+            //     tx.executeSql(
+            //         //'SELECT GEOMETRY, positionable_id FROM position_infos LIMIT 10',
+            //         'SELECT OGC_FID, ST_AsText(geometry) AS txt FROM position_infos',
+            //         [],
+            //         function (tx, results) {
+            //             console.log("crivvens: " + results.rows.length);
+            //             for(var i = 0; i < results.rows.length; i++){
+            //                 console.log(i + " : " + results.rows.item(i).txt);
+            //                 // for(var j in results.rows.item(i)){
+            //                 //     console.log(j);
+            //                 // }
+            //             }
+            //         }
+            //     );
+            // });
+
+
         }
     }, 2000);
 });
