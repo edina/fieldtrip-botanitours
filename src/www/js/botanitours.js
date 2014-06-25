@@ -37,44 +37,43 @@ define(['utils'], function(utils){
     }
 
     var db;
-    var timer = setInterval(function(){
-        db = window.sqlitePlugin.openDatabase(
-            "botanitours", "1.0", "botanitours", 2000000);
-
-        if(db === undefined){
-            console.debug("DB undefined");
-        }
-        else{
-            console.debug("** DB defined **");
-            clearInterval(timer);
-            db.transaction(function(tx) {
-                tx.executeSql(
-                    'SELECT count(*) as c FROM position_infos',
-                    [],
-                    function (tx, results) {
-                        console.log("rows: " + results.rows.item(0).c);
-                    }
-                );
+    window.SpatiaLitePlugin.openDatabase(
+        'botanitours',
+        function(database){
+            db = database;
+            db.info(function(msg){
+                console.log(msg);
             });
-            // db.transaction(function(tx) {
-            //     console.log("jings");
-            //     tx.executeSql(
-            //         //'SELECT GEOMETRY, positionable_id FROM position_infos LIMIT 10',
-            //         'SELECT OGC_FID, ST_AsText(geometry) AS txt FROM position_infos',
-            //         [],
-            //         function (tx, results) {
-            //             console.log("crivvens: " + results.rows.length);
-            //             for(var i = 0; i < results.rows.length; i++){
-            //                 console.log(i + " : " + results.rows.item(i).txt);
-            //                 // for(var j in results.rows.item(i)){
-            //                 //     console.log(j);
-            //                 // }
-            //             }
-            //         }
-            //     );
-            // });
 
+            db.executeSql(
+                'SELECT OGC_FID, ST_AsText(geometry) FROM position_infos WHERE ST_Within(geometry, BuildMbr(-2.4178, 55.8741, -2.2384, 55.8049))',
+                [],
+                function (results) {
+                    for(var i in results){
+                        if(parseInt(i) >= 0){
+                            console.log("=>");
+                            console.log(results[i][0] + " : " + results[i][1]);
+                        }
+                    }
+                },
+                function(error){
+                    console.log(error);
+                }
+            );
 
+            db.executeSql(
+                'SELECT count(*) FROM position_infos WHERE ST_Within(geometry, BuildMbr(-2.4178, 55.8741, -2.2384, 55.8049))',
+                [],
+                function (results) {
+                    console.log("rows: " + results[0][0]);
+                },
+                function(error){
+                    console.log(error);
+                }
+            );
+        },
+        function(){
+            console.log("Something went wrong with database.");
         }
-    }, 2000);
+    );
 });
