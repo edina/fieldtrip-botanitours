@@ -31,7 +31,77 @@ DAMAGE.
 
 "use strict";
 
-define(['utils'], function(utils){
+define(['map', 'utils'], function(map, utils){
+    var currentRecordsExtent;
+    var recordsLayer;
+
+    /**
+     * Show records on map.
+     * @param clusterName
+     */
+    var showRecords = function(clusterName){
+        if(recordsLayer){
+            map.removeLayer(recordsLayer);
+        }
+
+        $.getJSON('data/' + clusterName, $.proxy(function(data){
+            recordsLayer = map.addGeoJSONLayer(data);
+        }, this));
+    };
+
+    var isRefreshRequired = function(){
+        var isRequired = true;
+        if(currentRecordsExtent){
+            // var zoomLevel = map.getZoom();
+
+            // if(zoomLevel < 15){
+            //     if(){
+            // }
+            // else if typeof(currentRecordsExtent) === 'Number'{
+            //     return true
+            // }
+            // else{
+            //     return currentRecordsExtent.contains(map.getExtent());
+            // }
+            return currentRecordsExtent.contains(map.getExtent());
+        }
+
+        return isRequired;
+    };
+
+    map.registerReady(this, function(){
+        showRecords('cluster10.json');
+    });
+
+    map.registerPan(this, function(){
+        //console.log("***********");
+    });
+
+    map.registerZoom(this, function(){
+        var zoomLevel = map.getZoom();
+        console.log("zoom : " + zoomLevel);
+        var clusterName;
+        if(zoomLevel < 7){
+            clusterName = 'cluster1.json';
+        }
+        else if(zoomLevel < 9){
+            clusterName = 'cluster10.json';
+        }
+        else if(zoomLevel < 11){
+            clusterName = 'cluster20.json';
+        }
+        else if(zoomLevel < 13){
+            clusterName = 'cluster50.json';
+        }
+        else{
+            map.removeLayer(recordsLayer);
+        }
+        showRecords(clusterName);
+    });
+
+
+    map.setDefaultLonLat(-3.12, 55.3);
+
     if(!utils.isMobileDevice()){
         return;
     }
@@ -40,6 +110,7 @@ define(['utils'], function(utils){
     window.SpatiaLitePlugin.openDatabase(
         'botanitours',
         function(database){
+
             db = database;
             db.info(function(msg){
                 console.log(msg);
@@ -51,7 +122,6 @@ define(['utils'], function(utils){
                 function (results) {
                     for(var i in results){
                         if(parseInt(i) >= 0){
-                            console.log("=>");
                             console.log(results[i][0] + " : " + results[i][1]);
                         }
                     }
