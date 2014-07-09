@@ -32,37 +32,65 @@ DAMAGE.
 "use strict";
 
 define(['map', 'utils'], function(map, utils){
+    var db;
     var currentRecordsExtent;
     var recordsLayer;
 
     /**
-     * Show records on map.
+     * Show static cluster records on map.
      * @param clusterName
      */
     var showRecords = function(clusterName){
-        if(recordsLayer){
-            map.removeLayer(recordsLayer);
-        }
-
         $.getJSON('data/' + clusterName, $.proxy(function(data){
             recordsLayer = map.addGeoJSONLayer(data);
         }, this));
     };
 
+    /**
+     * Show records from database on map based on map extent.
+     */
+    var showRecordsFromDB = function(){
+        var extent = map.getExtent();
+
+        if(!isRefreshRequired()){
+            console.debug("No refresh required: " + extent);
+            return;
+        }
+
+        var ne = extent.getNorthWest();
+        var sw = extent.getSouthEast();
+        var sql = 'SELECT OGC_FID, AsGeoJSON(geometry) FROM position_infos WHERE ST_Within(geometry, BuildMbr(' + ne.lng + ',' + ne.lat + ',' + sw.lng + ',' + sw.lat + '))';
+        console.debug(sql);
+        db.executeSql(
+            sql,
+            [],
+            function(results) {
+                recordsLayer = map.createMarkerLayer();
+                for(var i in results){
+                    if(parseInt(i) >= 0){
+                        var point = JSON.parse(results[i][1]);
+                        map.addMarker(
+                            {
+                                lon: point.coordinates[0],
+                                lat: point.coordinates[1]
+                            },
+                            results[i][0],
+                            recordsLayer
+                        );
+                    }
+                }
+
+                map.addLayer(recordsLayer);
+            },
+            function(error){
+                console.error(error);
+            }
+        );
+    };
+
     var isRefreshRequired = function(){
         var isRequired = true;
         if(currentRecordsExtent){
-            // var zoomLevel = map.getZoom();
-
-            // if(zoomLevel < 15){
-            //     if(){
-            // }
-            // else if typeof(currentRecordsExtent) === 'Number'{
-            //     return true
-            // }
-            // else{
-            //     return currentRecordsExtent.contains(map.getExtent());
-            // }
             return currentRecordsExtent.contains(map.getExtent());
         }
 
@@ -70,16 +98,15 @@ define(['map', 'utils'], function(map, utils){
     };
 
     map.registerReady(this, function(){
-        showRecords('cluster10.json');
+        //showRecords('cluster10.json');
     });
 
     map.registerPan(this, function(){
-        //console.log("***********");
+
     });
 
     map.registerZoom(this, function(){
         var zoomLevel = map.getZoom();
-        console.log("zoom : " + zoomLevel);
         var clusterName;
         if(zoomLevel < 7){
             clusterName = 'cluster1.json';
@@ -93,57 +120,39 @@ define(['map', 'utils'], function(map, utils){
         else if(zoomLevel < 13){
             clusterName = 'cluster50.json';
         }
-        else{
+        else if(zoomLevel < 15){
+            clusterName = 'cluster100.json';
+        }
+
+        if(recordsLayer){
             map.removeLayer(recordsLayer);
         }
-        showRecords(clusterName);
+
+        console.debug("zoom: " + zoomLevel + " : " + clusterName);
+
+        if(clusterName){
+                showRecords(clusterName);
+        }
+        else{
+            showRecordsFromDB();
+        }
     });
 
-
     map.setDefaultLonLat(-3.12, 55.3);
-
     if(!utils.isMobileDevice()){
         return;
     }
 
-    var db;
     window.SpatiaLitePlugin.openDatabase(
         'botanitours',
         function(database){
-
             db = database;
             db.info(function(msg){
-                console.log(msg);
+                console.debug(msg);
             });
-
-            db.executeSql(
-                'SELECT OGC_FID, ST_AsText(geometry) FROM position_infos WHERE ST_Within(geometry, BuildMbr(-2.4178, 55.8741, -2.2384, 55.8049))',
-                [],
-                function (results) {
-                    for(var i in results){
-                        if(parseInt(i) >= 0){
-                            console.log(results[i][0] + " : " + results[i][1]);
-                        }
-                    }
-                },
-                function(error){
-                    console.log(error);
-                }
-            );
-
-            db.executeSql(
-                'SELECT count(*) FROM position_infos WHERE ST_Within(geometry, BuildMbr(-2.4178, 55.8741, -2.2384, 55.8049))',
-                [],
-                function (results) {
-                    console.log("rows: " + results[0][0]);
-                },
-                function(error){
-                    console.log(error);
-                }
-            );
         },
-        function(){
-            console.log("Something went wrong with database.");
+        function(e){
+            console.error("Something went wrong with database: " + e);
         }
     );
 });
