@@ -37,6 +37,33 @@ define(['map', 'utils'], function(map, utils){
     var recordsLayer;
 
     /**
+     * Get plant/garden name.
+     * @param id The marker id.
+     * @param type Markert type - plant of garden.
+     * @param callback Function executed on successful fetch.
+     */
+    var getRecordDescription = function(id, type, callback){
+        var sql;
+        if(type === 'Plant'){
+            sql = "SELECT scientific_name FROM plants WHERE OGC_FID = " + id;
+        }
+        else{
+            sql = "SELECT name FROM gardens WHERE OGC_FID = " + id;
+        }
+        console.debug(sql);
+        db.executeSql(
+            sql,
+            [],
+            function(results){
+                callback(results[0][0]);
+            },
+            function(error){
+                console.error(error);
+            }
+        );
+    };
+
+    /**
      * Show static cluster records on map.
      * @param clusterName
      */
@@ -52,32 +79,58 @@ define(['map', 'utils'], function(map, utils){
     var showRecordsFromDB = function(){
         var extent = map.getExtent();
 
-        if(!isRefreshRequired()){
-            console.debug("No refresh required: " + extent);
+        var ne = extent.getNorthEast();
+        var sw = extent.getSouthWest();
+
+        // increase area to reduce the need for database fetches
+        var buflat = (ne.lat - sw.lat) * 0.5;
+        var buflon = (sw.lng - ne.lng) * 0.5;
+        ne.lat = ne.lat + buflat;
+        ne.lng = ne.lng - buflon;
+        sw.lat = sw.lat - buflat;
+        sw.lng = sw.lng + buflon;
+
+        // remember bounds of last query
+        currentRecordsExtent = map.createBounds(sw, ne);
+
+        var sql = 'SELECT positionable_id, AsGeoJSON(geometry), positionable_type FROM position_infos WHERE ST_Within(geometry, BuildMbr(' + ne.lng + ',' + ne.lat + ',' + sw.lng + ',' + sw.lat + '))';
+        console.debug(sql);
+
+        if(db === undefined){
             return;
         }
 
-        var ne = extent.getNorthWest();
-        var sw = extent.getSouthEast();
-        var sql = 'SELECT OGC_FID, AsGeoJSON(geometry) FROM position_infos WHERE ST_Within(geometry, BuildMbr(' + ne.lng + ',' + ne.lat + ',' + sw.lng + ',' + sw.lat + '))';
-        console.debug(sql);
         db.executeSql(
             sql,
-            [],
+            [ne.lng, ne.lat, sw.lng, sw.lat],
             function(results) {
+                var markerClick = function(e){
+                    var data = e.target.data;
+                    getRecordDescription(data.id, data.type, function(name){
+                        e.target.bindPopup(name).openPopup();
+                    });
+                };
+
                 recordsLayer = map.createMarkerLayer();
-                for(var i in results){
-                    if(parseInt(i) >= 0){
-                        var point = JSON.parse(results[i][1]);
-                        map.addMarker(
-                            {
-                                lon: point.coordinates[0],
-                                lat: point.coordinates[1]
-                            },
-                            results[i][0],
-                            recordsLayer
-                        );
-                    }
+                for(var i = 0; i < results.length; i++){
+                    var id = results[i][0];
+                    var point = JSON.parse(results[i][1]);
+                    var type = results[i][2];
+
+                    var marker = map.addMarker(
+                        {
+                            lon: point.coordinates[0],
+                            lat: point.coordinates[1]
+                        },
+                        id,
+                        recordsLayer
+                    );
+
+                    marker.on('click', markerClick);
+                    marker.data = {
+                        'id': id,
+                        'type': type
+                    };
                 }
 
                 map.addLayer(recordsLayer);
@@ -88,24 +141,37 @@ define(['map', 'utils'], function(map, utils){
         );
     };
 
+    /**
+     * Show records be redrawn?.
+     */
     var isRefreshRequired = function(){
         var isRequired = true;
         if(currentRecordsExtent){
-            return currentRecordsExtent.contains(map.getExtent());
+            isRequired = !currentRecordsExtent.contains(map.getExtent());
         }
 
         return isRequired;
     };
 
-    map.registerReady(this, function(){
-        //showRecords('cluster10.json');
-    });
+    /**
+     * Map pan.
+     */
+    map.registerPan(function(){
+        var zoomLevel = map.getZoom();
+        if(zoomLevel > 14){
+            if(!isRefreshRequired()){
+                console.debug("No refresh required.");
+                return;
+            }
 
-    map.registerPan(this, function(){
+            showRecordsFromDB();
+        }
+    }, this);
 
-    });
-
-    map.registerZoom(this, function(){
+    /**
+     * Map zoom.
+     */
+    map.registerZoom(function(e){
         var zoomLevel = map.getZoom();
         var clusterName;
         if(zoomLevel < 7){
@@ -131,14 +197,14 @@ define(['map', 'utils'], function(map, utils){
         console.debug("zoom: " + zoomLevel + " : " + clusterName);
 
         if(clusterName){
-                showRecords(clusterName);
+            showRecords(clusterName);
         }
         else{
             showRecordsFromDB();
         }
-    });
+    }, this);
 
-    map.setDefaultLonLat(-3.12, 55.3);
+    map.setDefaultLonLat(-3.1627, 55.9464);
     if(!utils.isMobileDevice()){
         return;
     }
