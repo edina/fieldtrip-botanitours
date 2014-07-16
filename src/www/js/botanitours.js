@@ -34,18 +34,51 @@ DAMAGE.
 define(['map', 'utils'], function(map, utils){
     var db;
     var currentRecordsExtent;
-    var recordsLayer;
+    var pois;
+
+    /**
+     * Get common names of a given plant.
+     * @param id - plant id
+     * @param callback Function executed on successful fetch.
+     */
+    var getPlantCommonNames = function(id, callback){
+        var sql = "SELECT c.name FROM plants p, plant_common_names c WHERE p.OGC_FID = c.plant_id AND p.OGC_FID = " + id;
+        console.debug(sql);
+        db.executeSql(
+            sql,
+            [],
+            function(results){
+                var names = '';
+                $.each(results, function(i, name){
+                    if(i !== 0){
+                        names += ', ';
+                    }
+                    names += name[0];
+                });
+                callback(names);
+            },
+            function(error){
+                console.error(error);
+            }
+        );
+    };
 
     /**
      * Get plant/garden name.
-     * @param id The marker id.
-     * @param type Markert type - plant of garden.
+     * @param data associated with point
+     *   id - The marker id.
+     *   type - Marker type - plant of garden.
+     *   year - year of observation.
      * @param callback Function executed on successful fetch.
      */
-    var getRecordDescription = function(id, type, callback){
+    var getPoiDescription = function(data, callback){
         var sql;
+        var id = data.id;
+        var type = data.type;
+        var year = data.year;
+
         if(type === 'Plant'){
-            sql = "SELECT scientific_name FROM plants WHERE OGC_FID = " + id;
+            sql = "SELECT scientific_name, eol_image FROM plants WHERE OGC_FID = " + id;
         }
         else{
             sql = "SELECT name FROM gardens WHERE OGC_FID = " + id;
@@ -55,7 +88,18 @@ define(['map', 'utils'], function(map, utils){
             sql,
             [],
             function(results){
-                callback(results[0][0]);
+                var entry = results[0];
+                if(type === 'Plant'){
+                    var image = entry[1];
+                    getPlantCommonNames(id, function(names){
+                        var html = '<div id="poi-popup"><h1>' + entry[0] + '</h1><img src="' + image + '" alt="jings"><p><strong>Common names</strong>: ' + names + '</p><p><strong>Year of observation</strong>: ' + year + '</p></div>';
+                        callback(html);
+                    });
+                }
+                else{
+                    var html = '<div><h1>' + entry[0] + '</h1></div>';
+                    callback(html);
+                }
             },
             function(error){
                 console.error(error);
@@ -69,7 +113,14 @@ define(['map', 'utils'], function(map, utils){
      */
     var showRecords = function(clusterName){
         $.getJSON('data/' + clusterName, $.proxy(function(data){
-            recordsLayer = map.addGeoJSONLayer(data);
+            pois = map.addGeoJSONLayer(data, function(feature){
+                var coords = feature.geometry.coordinates;
+                map.setCentre({
+                    lon: coords[0],
+                    lat: coords[1],
+                    zoom: map.getZoom() + 2
+                });
+            });
         }, this));
     };
 
@@ -93,7 +144,7 @@ define(['map', 'utils'], function(map, utils){
         // remember bounds of last query
         currentRecordsExtent = map.createBounds(sw, ne);
 
-        var sql = 'SELECT positionable_id, AsGeoJSON(geometry), positionable_type FROM position_infos WHERE ST_Within(geometry, BuildMbr(' + ne.lng + ',' + ne.lat + ',' + sw.lng + ',' + sw.lat + '))';
+        var sql = 'SELECT positionable_id, AsGeoJSON(geometry), positionable_type, year FROM position_infos WHERE ST_Within(geometry, BuildMbr(' + ne.lng + ',' + ne.lat + ',' + sw.lng + ',' + sw.lat + '))';
         console.debug(sql);
 
         if(db === undefined){
@@ -105,17 +156,17 @@ define(['map', 'utils'], function(map, utils){
             [ne.lng, ne.lat, sw.lng, sw.lat],
             function(results) {
                 var markerClick = function(e){
-                    var data = e.target.data;
-                    getRecordDescription(data.id, data.type, function(name){
-                        e.target.bindPopup(name).openPopup();
+                    getPoiDescription(e.target.data, function(html){
+                        e.target.bindPopup(html).openPopup();
                     });
                 };
 
-                recordsLayer = map.createMarkerLayer();
+                pois = map.createMarkerLayer();
                 for(var i = 0; i < results.length; i++){
                     var id = results[i][0];
                     var point = JSON.parse(results[i][1]);
                     var type = results[i][2];
+                    var year = results[i][3];
 
                     var marker = map.addMarker(
                         {
@@ -123,17 +174,18 @@ define(['map', 'utils'], function(map, utils){
                             lat: point.coordinates[1]
                         },
                         id,
-                        recordsLayer
+                        pois
                     );
 
                     marker.on('click', markerClick);
                     marker.data = {
                         'id': id,
-                        'type': type
+                        'type': type,
+                        'year': year
                     };
                 }
 
-                map.addLayer(recordsLayer);
+                map.addLayer(pois);
             },
             function(error){
                 console.error(error);
@@ -174,6 +226,7 @@ define(['map', 'utils'], function(map, utils){
     map.registerZoom(function(e){
         var zoomLevel = map.getZoom();
         var clusterName;
+
         if(zoomLevel < 7){
             clusterName = 'cluster1.json';
         }
@@ -181,17 +234,17 @@ define(['map', 'utils'], function(map, utils){
             clusterName = 'cluster10.json';
         }
         else if(zoomLevel < 11){
-            clusterName = 'cluster20.json';
-        }
-        else if(zoomLevel < 13){
             clusterName = 'cluster50.json';
         }
-        else if(zoomLevel < 15){
+        else if(zoomLevel < 13){
             clusterName = 'cluster100.json';
         }
+        else if(zoomLevel < 15){
+            clusterName = 'cluster200.json';
+        }
 
-        if(recordsLayer){
-            map.removeLayer(recordsLayer);
+        if(pois){
+            map.removeLayer(pois);
         }
 
         console.debug("zoom: " + zoomLevel + " : " + clusterName);
@@ -204,7 +257,7 @@ define(['map', 'utils'], function(map, utils){
         }
     }, this);
 
-    map.setDefaultLonLat(-3.1627, 55.9464);
+    map.setDefaultLonLat(-3.162, 55.944);
     if(!utils.isMobileDevice()){
         return;
     }
