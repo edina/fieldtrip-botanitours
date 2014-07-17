@@ -31,6 +31,8 @@ DAMAGE.
 
 "use strict";
 
+/* global L */
+
 define(['map', 'utils'], function(map, utils){
     var db;
     var currentRecordsExtent;
@@ -75,7 +77,6 @@ define(['map', 'utils'], function(map, utils){
         var sql;
         var id = data.id;
         var type = data.type;
-        var year = data.year;
 
         if(type === 'Plant'){
             sql = "SELECT scientific_name, eol_image FROM plants WHERE OGC_FID = " + id;
@@ -90,6 +91,7 @@ define(['map', 'utils'], function(map, utils){
             function(results){
                 var entry = results[0];
                 if(type === 'Plant'){
+                    var year = data.year;
                     var image = entry[1];
                     getPlantCommonNames(id, function(names){
                         var html = '<div id="poi-popup"><h1>' + entry[0] + '</h1><img src="' + image + '" alt="jings"><p><strong>Common names</strong>: ' + names + '</p><p><strong>Year of observation</strong>: ' + year + '</p></div>';
@@ -113,14 +115,47 @@ define(['map', 'utils'], function(map, utils){
      */
     var showRecords = function(clusterName){
         $.getJSON('data/' + clusterName, $.proxy(function(data){
-            pois = map.addGeoJSONLayer(data, function(feature){
-                var coords = feature.geometry.coordinates;
-                map.setCentre({
-                    lon: coords[0],
-                    lat: coords[1],
-                    zoom: map.getZoom() + 2
-                });
-            });
+            pois = map.addGeoJSONLayer(
+                data,
+                function(feature){
+                    var html = '';
+                    var className = 'marker-icon';
+                    var props = feature.properties;
+                    if(props.count > 1){
+                        className = 'cluster-icon';
+                        html = '<div class="cluster-icon-text">' + feature.properties.count + '</div>';
+                    }
+                    else if(props.type === 'Garden'){
+                        className = 'marker-icon-red';
+                    }
+
+                    var icon = L.divIcon({
+                        className: className,
+                        html: html,
+                        iconSize: [40, 40]
+                    });
+
+                    return icon;
+                },
+                function(feature, layer){
+                    var coords = feature.geometry.coordinates;
+
+                    if(feature.properties.count === 1){
+                        // find point info
+                        getPoiDescription(feature.properties, function(html){
+                            layer.bindPopup(html).openPopup();
+                        });
+                    }
+                    else{
+                        // just centre map
+                        map.setCentre({
+                            lon: coords[0],
+                            lat: coords[1],
+                            zoom: map.getZoom() + 2
+                        });
+                    }
+                }
+            );
         }, this));
     };
 
@@ -162,18 +197,26 @@ define(['map', 'utils'], function(map, utils){
                 };
 
                 pois = map.createMarkerLayer();
+
                 for(var i = 0; i < results.length; i++){
                     var id = results[i][0];
                     var point = JSON.parse(results[i][1]);
                     var type = results[i][2];
                     var year = results[i][3];
+                    var className = 'marker-icon';
+                    if(type === 'Garden'){
+                        className = 'marker-icon-red';
+                    }
 
                     var marker = map.addMarker(
                         {
                             lon: point.coordinates[0],
                             lat: point.coordinates[1]
                         },
-                        id,
+                        L.divIcon({
+                            className: className,
+                            iconSize: [40, 40]
+                        }),
                         pois
                     );
 
@@ -256,6 +299,12 @@ define(['map', 'utils'], function(map, utils){
             showRecordsFromDB();
         }
     }, this);
+
+    // edinburgh
+    //var p = [-3.162, 55.944];
+
+    // dumfries
+    var p = [-3.607, 55.072];
 
     map.setDefaultLonLat(-3.162, 55.944);
     if(!utils.isMobileDevice()){
