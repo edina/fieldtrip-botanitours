@@ -37,6 +37,30 @@ define(['map', 'utils'], function(map, utils){
     var db;
     var currentRecordsExtent;
     var pois;
+    var filter;
+    var lastFetch;
+
+    /**
+     * Select poi filter.
+     */
+    var filterPoi = function(){
+        $('#poi-filter-popup li').removeClass('ui-btn-active');
+        $('#poi-filter-popup').popup('open');
+
+        if(filter === undefined){
+            filter = 'None';
+        }
+
+        $('#poi-filter-' + filter).addClass('ui-btn-active');
+
+        $('#poi-filter-popup li').off('vclick');
+        $('#poi-filter-popup li').on('vclick', function(e){
+            var id = $(e.target).closest('li').attr('id');
+            filter = id.substr(id.lastIndexOf('-') + 1);
+            $('#poi-filter-popup').popup('close');
+            redrawPoi();
+        });
+    };
 
     /**
      * Get common names of a given plant.
@@ -82,7 +106,7 @@ define(['map', 'utils'], function(map, utils){
             sql = "SELECT scientific_name, eol_image FROM plants WHERE OGC_FID = " + id;
         }
         else{
-            sql = "SELECT name FROM gardens WHERE OGC_FID = " + id;
+            sql = "SELECT name, opening_times_txt FROM gardens WHERE OGC_FID = " + id;
         }
         console.debug(sql);
         db.executeSql(
@@ -99,7 +123,7 @@ define(['map', 'utils'], function(map, utils){
                     });
                 }
                 else{
-                    var html = '<div><h1>' + entry[0] + '</h1></div>';
+                    var html = '<div><h1>' + entry[0] + '</h1><p><strong>Opening Times:</strong>: ' + entry[1] + '</div>';
                     callback(html);
                 }
             },
@@ -110,53 +134,116 @@ define(['map', 'utils'], function(map, utils){
     };
 
     /**
+     * Should records be redrawn?
+     */
+    var isRefreshRequired = function(){
+        var isRequired = true;
+        if(currentRecordsExtent){
+            isRequired = !currentRecordsExtent.contains(map.getExtent());
+        }
+
+        return isRequired;
+    };
+
+    /**
+     * Redraw points of interest.
+     */
+    var redrawPoi = function(){
+        // Get cached cluster name, based on zoom level and filter.
+        var zoomLevel = map.getZoom();
+        var clusterName;
+
+        if(filter === 'Gardens'){
+            // there is a single cached json file for gardens
+            clusterName = 'Gardens.json';
+        }
+        else{
+            if(zoomLevel < 7){
+                clusterName = 'cluster1.json';
+            }
+            else if(zoomLevel < 9){
+                clusterName = 'cluster10.json';
+            }
+            else if(zoomLevel < 11){
+                clusterName = 'cluster50.json';
+            }
+            else if(zoomLevel < 13){
+                clusterName = 'cluster100.json';
+            }
+            else if(zoomLevel < 15){
+                clusterName = 'cluster200.json';
+            }
+
+            if(clusterName && filter === 'Plant'){
+                clusterName = filter + clusterName;
+            }
+        }
+
+        console.debug("zoom: " + zoomLevel + " : " + clusterName);
+
+        if(clusterName){
+            showRecords(clusterName);
+        }
+        else{
+            showRecordsFromDB();
+        }
+    };
+
+    /**
      * Show static cluster records on map.
      * @param clusterName
      */
     var showRecords = function(clusterName){
-        $.getJSON('data/' + clusterName, $.proxy(function(data){
-            pois = map.addGeoJSONLayer(
-                data,
-                function(feature){
-                    var html = '';
-                    var className = 'marker-icon';
-                    var props = feature.properties;
-                    if(props.count > 1){
-                        className = 'cluster-icon';
-                        html = '<div class="cluster-icon-text">' + feature.properties.count + '</div>';
-                    }
-                    else if(props.type === 'Garden'){
-                        className = 'marker-icon-red';
-                    }
+        if(lastFetch !== clusterName){
+            if(pois){
+                map.removeLayer(pois);
+            }
 
-                    var icon = L.divIcon({
-                        className: className,
-                        html: html,
-                        iconSize: [40, 40]
-                    });
+            $.getJSON('data/' + clusterName, $.proxy(function(data){
+                lastFetch = clusterName;
+                pois = map.addGeoJSONLayer(
+                    data,
+                    function(feature){
+                        var html = '';
+                        var className = 'marker-icon';
+                        var props = feature.properties;
+                        if(props.count > 1){
+                            className = 'cluster-icon';
+                            html = '<div class="cluster-icon-text">' + feature.properties.count + '</div>';
+                        }
+                        else if(props.type === 'Garden'){
+                            className = 'marker-icon-red';
+                        }
 
-                    return icon;
-                },
-                function(feature, layer){
-                    var coords = feature.geometry.coordinates;
-
-                    if(feature.properties.count === 1){
-                        // find point info
-                        getPoiDescription(feature.properties, function(html){
-                            layer.bindPopup(html).openPopup();
+                        var icon = L.divIcon({
+                            className: className,
+                            html: html,
+                            iconSize: [40, 40]
                         });
+
+                        return icon;
+                    },
+                    function(feature, layer){
+                        var coords = feature.geometry.coordinates;
+
+                        if(feature.properties.count === 1 || feature.properties.type === 'Garden'){
+                            // find point info
+                            getPoiDescription(feature.properties, function(html){
+                                layer.bindPopup(html).openPopup();
+                            });
+                        }
+                        else{
+                            // just centre map
+                            map.setCentre({
+                                lon: coords[0],
+                                lat: coords[1],
+                                zoom: map.getZoom() + 2
+                            });
+                        }
                     }
-                    else{
-                        // just centre map
-                        map.setCentre({
-                            lon: coords[0],
-                            lat: coords[1],
-                            zoom: map.getZoom() + 2
-                        });
-                    }
-                }
-            );
-        }, this));
+                );
+            }, this));
+        }
     };
 
     /**
@@ -168,6 +255,10 @@ define(['map', 'utils'], function(map, utils){
         var ne = extent.getNorthEast();
         var sw = extent.getSouthWest();
 
+        if(pois){
+            map.removeLayer(pois);
+        }
+
         // increase area to reduce the need for database fetches
         var buflat = (ne.lat - sw.lat) * 0.5;
         var buflon = (sw.lng - ne.lng) * 0.5;
@@ -176,8 +267,10 @@ define(['map', 'utils'], function(map, utils){
         sw.lat = sw.lat - buflat;
         sw.lng = sw.lng + buflon;
 
+
         // remember bounds of last query
         currentRecordsExtent = map.createBounds(sw, ne);
+        lastFetch = undefined;
 
         var sql = 'SELECT positionable_id, AsGeoJSON(geometry), positionable_type, year FROM position_infos WHERE ST_Within(geometry, BuildMbr(' + ne.lng + ',' + ne.lat + ',' + sw.lng + ',' + sw.lat + '))';
         console.debug(sql);
@@ -237,23 +330,11 @@ define(['map', 'utils'], function(map, utils){
     };
 
     /**
-     * Show records be redrawn?.
-     */
-    var isRefreshRequired = function(){
-        var isRequired = true;
-        if(currentRecordsExtent){
-            isRequired = !currentRecordsExtent.contains(map.getExtent());
-        }
-
-        return isRequired;
-    };
-
-    /**
      * Map pan.
      */
     map.registerPan(function(){
         var zoomLevel = map.getZoom();
-        if(zoomLevel > 14){
+        if(filter !== 'Gardens' && zoomLevel > 14){
             if(!isRefreshRequired()){
                 console.debug("No refresh required.");
                 return;
@@ -266,39 +347,7 @@ define(['map', 'utils'], function(map, utils){
     /**
      * Map zoom.
      */
-    map.registerZoom(function(e){
-        var zoomLevel = map.getZoom();
-        var clusterName;
-
-        if(zoomLevel < 7){
-            clusterName = 'cluster1.json';
-        }
-        else if(zoomLevel < 9){
-            clusterName = 'cluster10.json';
-        }
-        else if(zoomLevel < 11){
-            clusterName = 'cluster50.json';
-        }
-        else if(zoomLevel < 13){
-            clusterName = 'cluster100.json';
-        }
-        else if(zoomLevel < 15){
-            clusterName = 'cluster200.json';
-        }
-
-        if(pois){
-            map.removeLayer(pois);
-        }
-
-        console.debug("zoom: " + zoomLevel + " : " + clusterName);
-
-        if(clusterName){
-            showRecords(clusterName);
-        }
-        else{
-            showRecordsFromDB();
-        }
-    }, this);
+    map.registerZoom(redrawPoi, this);
 
     // edinburgh
     //var p = [-3.162, 55.944];
@@ -307,6 +356,9 @@ define(['map', 'utils'], function(map, utils){
     var p = [-3.607, 55.072];
 
     map.setDefaultLonLat(-3.162, 55.944);
+
+    $(document).on('vclick', '#filter-poi', filterPoi);
+
     if(!utils.isMobileDevice()){
         return;
     }

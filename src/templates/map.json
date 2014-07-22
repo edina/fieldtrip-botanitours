@@ -1,0 +1,19 @@
+{
+    "header": {
+        "buttons" : {
+            "filter":{
+                "id": "filter-poi",
+                "data-role": "button",
+                "data-inline": "true",
+                "data-transition": "none",
+                "data-iconpos": "notext"
+            }
+        }
+    },
+    "popups": {
+        "popup1":{
+            "template": "filter-poi-popup.html",
+            "data": {}
+        }
+    }
+}
