@@ -31,7 +31,7 @@ DAMAGE.
 
 "use strict";
 
-/* global L */
+/* global L, _ */
 
 define(['map', 'utils'], function(map, utils){
     var db;
@@ -158,20 +158,8 @@ define(['map', 'utils'], function(map, utils){
             clusterName = 'Gardens.json';
         }
         else{
-            if(zoomLevel < 7){
-                clusterName = 'cluster1.json';
-            }
-            else if(zoomLevel < 9){
-                clusterName = 'cluster10.json';
-            }
-            else if(zoomLevel < 11){
-                clusterName = 'cluster50.json';
-            }
-            else if(zoomLevel < 13){
-                clusterName = 'cluster100.json';
-            }
-            else if(zoomLevel < 15){
-                clusterName = 'cluster200.json';
+            if(clusters[zoomLevel]){
+                clusterName = 'cluster' + clusters[zoomLevel] + '.json';
             }
 
             if(clusterName && filter === 'Plant'){
@@ -332,9 +320,10 @@ define(['map', 'utils'], function(map, utils){
     /**
      * Map pan.
      */
+    var lastCachedZoomLevel = 0;
     map.registerPan(function(){
         var zoomLevel = map.getZoom();
-        if(filter !== 'Gardens' && zoomLevel > 14){
+        if(filter !== 'Gardens' && zoomLevel > lastCachedZoomLevel){
             if(!isRefreshRequired()){
                 console.debug("No refresh required.");
                 return;
@@ -357,7 +346,31 @@ define(['map', 'utils'], function(map, utils){
 
     map.setDefaultLonLat(-3.162, 55.944);
 
+    var clusters;
+    require(['config'], function(config){
+        clusters = JSON.parse(config.clusters);
+        // flatten any ranges (so 0-3 become 1,2,3)
+        $.each(clusters, function(i, cluster){
+            var startEnd = i.split('-');
+            if(startEnd.length > 1){
+                var range = _.range(parseInt(startEnd[0]), parseInt(startEnd[1]) + 1);
+                $.each(range, function(j, index){
+                    clusters[index] = cluster;
+                    lastCachedZoomLevel = Math.max(lastCachedZoomLevel, parseInt(index));
+                });
+            }
+
+            lastCachedZoomLevel = Math.max(lastCachedZoomLevel, parseInt(startEnd));
+        });
+    });
+
+
     $(document).on('vclick', '#filter-poi', filterPoi);
+
+    // close popup on click
+    $(document).on('vclick', '.leaflet-popup', function(){
+        map.closePopup();
+    });
 
     if(!utils.isMobileDevice()){
         return;
