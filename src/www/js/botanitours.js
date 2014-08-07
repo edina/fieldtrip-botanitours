@@ -33,7 +33,7 @@ DAMAGE.
 
 /* global L, _ */
 
-define(['map', 'utils'], function(map, utils){
+define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtils){
     var db;
     var currentRecordsExtent;
     var pois;
@@ -98,7 +98,15 @@ define(['map', 'utils'], function(map, utils){
                     };
                 }
 
-                map.addLayer(pois);
+                if(results.length > 0){
+                    map.addLayer(pois);
+
+                    // pan to nearest result
+                    panToClosest(pois.getLayers());
+                }
+                else{
+                    utils.inform("No results found.");
+                }
             },
             function(error){
                 console.error(error);
@@ -147,6 +155,11 @@ define(['map', 'utils'], function(map, utils){
             filter.text = $('#poi-filter-text').val().trim();
             $('#poi-filter-popup').popup('close');
             redrawPoi();
+        });
+
+        $('#poi-filter-popup-clear').off('click');
+        $('#poi-filter-popup-clear').on('click', function(e){
+            $('#poi-filter-text').val('');
         });
 
         highlightEntry();
@@ -224,6 +237,20 @@ define(['map', 'utils'], function(map, utils){
     };
 
     /**
+     * Pan map to closest record in layers array.
+     * @param layers Leaflet {array}
+     */
+    var panToClosest = function(layers){
+        var lmap = map.getMap();
+        var res = geomUtils.closestLayer(
+            lmap,
+            layers,
+            map.getCentre()
+        );
+        lmap.panTo(res.latlng);
+    };
+
+    /**
      * Should records be redrawn?
      */
     var isRefreshRequired = function(){
@@ -273,7 +300,7 @@ define(['map', 'utils'], function(map, utils){
     };
 
     /**
-     * Show static cluster records on map.
+     * Show static cluster geojson records on map.
      * @param clusterName
      */
     var showRecords = function(clusterName){
@@ -287,6 +314,7 @@ define(['map', 'utils'], function(map, utils){
                 pois = map.addGeoJSONLayer(
                     data,
                     function(feature){
+                        // called for each icon add to the layer
                         var html = '';
                         var className = 'marker-icon';
                         var props = feature.properties;
@@ -307,6 +335,7 @@ define(['map', 'utils'], function(map, utils){
                         return icon;
                     },
                     function(feature, layer){
+                        // executed when feature is clicked
                         var coords = feature.geometry.coordinates;
 
                         if(feature.properties.count === 1 || feature.properties.type === 'Garden'){
@@ -325,6 +354,8 @@ define(['map', 'utils'], function(map, utils){
                         }
                     }
                 );
+
+                panToClosest(pois.getLayers());
             }, this));
         }
     };
@@ -363,7 +394,7 @@ define(['map', 'utils'], function(map, utils){
             // save cloned filter as last fetch
             lastFetch = utils.clone(filter);
 
-            sql = "SELECT DISTINCT i.positionable_id, AsGeoJSON(i.geometry), i.positionable_type, i.year FROM position_infos i, {0} t WHERE t.{1} LIKE '%{2}%' AND t.{3} = i.positionable_id AND positionable_type = '{4}'".format(
+            sql = "SELECT DISTINCT i.positionable_id, AsGeoJSON(i.geometry), i.positionable_type, i.year FROM position_infos i, {0} t WHERE LOWER(t.{1}) LIKE LOWER('%{2}%') AND t.{3} = i.positionable_id AND positionable_type = '{4}'".format(
                 table, filterField, filter.text, joinField, filter.type);
 
             showRecordsBySQL(sql);
