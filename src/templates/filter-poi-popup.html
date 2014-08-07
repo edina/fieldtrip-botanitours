@@ -2,6 +2,33 @@
   <ul data-role="listview">
     <li id="poi-filter-None"><a href="#">All</a></li>
     <li id="poi-filter-Plant"><a href="#">Plants</a></li>
-    <li id="poi-filter-Gardens"><a href="#">Gardens</a></li>
+    <li id="poi-filter-Garden"><a href="#">Gardens</a></li>
   </ul>
+  <div id="poi-text-filter-plants" data-role="fieldcontain">
+    <fieldset data-role="controlgroup" data-type="horizontal">
+      <label for="poi-filter-Plant-scientific">Scientific Name</label>
+      <input type="radio"
+             name="poi-filter-Plant-type"
+             id="poi-filter-Plant-scientific"
+             value="scientific"
+             checked="checked">
+      <label for="poi-filter-Plant-common">Common Name</label>
+      <input type="radio"
+             name="poi-filter-Plant-type"
+             id="poi-filter-Plant-common"
+             name="poi-filter-Plant-common"
+             value="common">
+    </fieldset>
+  </div>
+  <div id="poi-text-filter">
+    <input type="text" id="poi-filter-text" value="" data-mini="true"/>
+  </div>
+  <div class="ui-grid-a">
+    <div class="ui-block-a">
+      <a id="poi-filter-popup-ok" data-role="button">Ok</a>
+    </div>
+    <div class="ui-block-b">
+      <a data-role="button" data-rel="back">Cancel</a>
+    </div>
+  </div>
 </div>

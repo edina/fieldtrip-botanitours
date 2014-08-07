@@ -37,29 +37,119 @@ define(['map', 'utils'], function(map, utils){
     var db;
     var currentRecordsExtent;
     var pois;
-    var filter;
     var lastFetch;
+
+    var filter = {
+        type: 'None',
+        text: '',
+        subtype: ''
+    };
+
+    /**
+     * Execute sql and show results as markers.
+     * @param sql The sql select statement.
+     */
+    var showRecordsBySQL = function(sql){
+        console.debug(sql);
+
+        if(db === undefined){
+            return;
+        }
+
+        db.executeSql(
+            sql,
+            [],
+            function(results){
+                var markerClick = function(e){
+                    getPoiDescription(e.target.data, function(html){
+                        e.target.bindPopup(html).openPopup();
+                    });
+                };
+
+                pois = map.createMarkerLayer();
+                console.debug(results.length + " results returned");
+                for(var i = 0; i < results.length; i++){
+                    var id = results[i][0];
+                    var point = JSON.parse(results[i][1]);
+                    var type = results[i][2];
+                    var year = results[i][3];
+                    var className = 'marker-icon';
+                    if(type === 'Garden'){
+                        className = 'marker-icon-red';
+                    }
+
+                    var marker = map.addMarker(
+                        {
+                            lon: point.coordinates[0],
+                            lat: point.coordinates[1]
+                        },
+                        L.divIcon({
+                            className: className,
+                            iconSize: [40, 40]
+                        }),
+                        pois
+                    );
+
+                    marker.on('click', markerClick);
+                    marker.data = {
+                        'id': id,
+                        'type': type,
+                        'year': year
+                    };
+                }
+
+                map.addLayer(pois);
+            },
+            function(error){
+                console.error(error);
+            }
+        );
+    };
 
     /**
      * Select poi filter.
      */
     var filterPoi = function(){
-        $('#poi-filter-popup li').removeClass('ui-btn-active');
         $('#poi-filter-popup').popup('open');
 
-        if(filter === undefined){
-            filter = 'None';
-        }
+        var highlightEntry = function(){
+            var id = 'poi-filter-' + filter.type;
 
-        $('#poi-filter-' + filter).addClass('ui-btn-active');
+            $('#poi-filter-popup li').removeClass('ui-btn-active');
+            $('#' + id).addClass('ui-btn-active');
+            $('#poi-text-filter-plants').hide();
+            $('#poi-filter-text').show();
+
+            if(id === 'poi-filter-Plant'){
+                $('#poi-text-filter-plants').show();
+            }
+            else if(id === 'poi-filter-None'){
+                $('#poi-filter-text').hide();
+            }
+            else{
+                $('#poi-text-filter-plants').hide();
+            }
+        };
 
         $('#poi-filter-popup li').off('vclick');
         $('#poi-filter-popup li').on('vclick', function(e){
             var id = $(e.target).closest('li').attr('id');
-            filter = id.substr(id.lastIndexOf('-') + 1);
+            filter.type = id.substr(id.lastIndexOf('-') + 1);
+            highlightEntry();
+        });
+
+        $("input[name='poi-filter-Plant-type']").change('click', function(e){
+            filter.subtype = $(this).val();
+        });
+
+        $('#poi-filter-popup-ok').off('click');
+        $('#poi-filter-popup-ok').on('click', function(e){
+            filter.text = $('#poi-filter-text').val().trim();
             $('#poi-filter-popup').popup('close');
             redrawPoi();
         });
+
+        highlightEntry();
     };
 
     /**
@@ -153,27 +243,32 @@ define(['map', 'utils'], function(map, utils){
         var zoomLevel = map.getZoom();
         var clusterName;
 
-        if(filter === 'Gardens'){
-            // there is a single cached json file for gardens
-            clusterName = 'Gardens.json';
+        if(filter.type !== 'None' && filter.text.length > 0){
+            // filter by text only applies to plants and gardens not both
+            showRecordsByFilter();
         }
         else{
-            if(clusters[zoomLevel]){
-                clusterName = 'cluster' + clusters[zoomLevel] + '.json';
+            if(filter.type === 'Garden'){
+                // there is a single cached json file for gardens
+                clusterName = 'Gardens.json';
+            }
+            else{
+                if(clusters[zoomLevel]){
+                    clusterName = 'cluster' + clusters[zoomLevel] + '.json';
+                }
+
+                if(clusterName && filter.type === 'Plant'){
+                    clusterName = filter.type + clusterName;
+                }
             }
 
-            if(clusterName && filter === 'Plant'){
-                clusterName = filter + clusterName;
+            console.debug("zoom: " + zoomLevel + " : " + clusterName);
+            if(clusterName){
+                showRecords(clusterName);
             }
-        }
-
-        console.debug("zoom: " + zoomLevel + " : " + clusterName);
-
-        if(clusterName){
-            showRecords(clusterName);
-        }
-        else{
-            showRecordsFromDB();
+            else{
+                showRecordsFromDB();
+            }
         }
     };
 
@@ -235,6 +330,47 @@ define(['map', 'utils'], function(map, utils){
     };
 
     /**
+     * Show records from database on map based on filter text.
+     */
+    var showRecordsByFilter = function(){
+        if(utils.compare(lastFetch, filter)){
+            return;
+        }
+        else{
+            if(pois){
+                map.removeLayer(pois);
+            }
+            var sql;
+            var table;
+            var joinField = 'OGC_FID';
+            var filterField = 'name';
+
+            if(filter.type === 'Plant'){
+                if(filter.subtype === 'common'){
+                    table = 'plant_common_names';
+                    joinField = 'plant_id';
+                }
+                else{
+                    table = 'plants';
+                    filterField = 'scientific_name';
+                }
+
+            }
+            else if(filter.type === 'Garden'){
+                table = 'gardens';
+            }
+
+            // save cloned filter as last fetch
+            lastFetch = utils.clone(filter);
+
+            sql = "SELECT DISTINCT i.positionable_id, AsGeoJSON(i.geometry), i.positionable_type, i.year FROM position_infos i, {0} t WHERE t.{1} LIKE '%{2}%' AND t.{3} = i.positionable_id AND positionable_type = '{4}'".format(
+                table, filterField, filter.text, joinField, filter.type);
+
+            showRecordsBySQL(sql);
+        }
+    };
+
+    /**
      * Show records from database on map based on map extent.
      */
     var showRecordsFromDB = function(){
@@ -255,66 +391,12 @@ define(['map', 'utils'], function(map, utils){
         sw.lat = sw.lat - buflat;
         sw.lng = sw.lng + buflon;
 
-
         // remember bounds of last query
         currentRecordsExtent = map.createBounds(sw, ne);
         lastFetch = undefined;
 
         var sql = 'SELECT positionable_id, AsGeoJSON(geometry), positionable_type, year FROM position_infos WHERE ST_Within(geometry, BuildMbr(' + ne.lng + ',' + ne.lat + ',' + sw.lng + ',' + sw.lat + '))';
-        console.debug(sql);
-
-        if(db === undefined){
-            return;
-        }
-
-        db.executeSql(
-            sql,
-            [ne.lng, ne.lat, sw.lng, sw.lat],
-            function(results) {
-                var markerClick = function(e){
-                    getPoiDescription(e.target.data, function(html){
-                        e.target.bindPopup(html).openPopup();
-                    });
-                };
-
-                pois = map.createMarkerLayer();
-
-                for(var i = 0; i < results.length; i++){
-                    var id = results[i][0];
-                    var point = JSON.parse(results[i][1]);
-                    var type = results[i][2];
-                    var year = results[i][3];
-                    var className = 'marker-icon';
-                    if(type === 'Garden'){
-                        className = 'marker-icon-red';
-                    }
-
-                    var marker = map.addMarker(
-                        {
-                            lon: point.coordinates[0],
-                            lat: point.coordinates[1]
-                        },
-                        L.divIcon({
-                            className: className,
-                            iconSize: [40, 40]
-                        }),
-                        pois
-                    );
-
-                    marker.on('click', markerClick);
-                    marker.data = {
-                        'id': id,
-                        'type': type,
-                        'year': year
-                    };
-                }
-
-                map.addLayer(pois);
-            },
-            function(error){
-                console.error(error);
-            }
-        );
+        showRecordsBySQL(sql);
     };
 
     /**
@@ -344,7 +426,7 @@ define(['map', 'utils'], function(map, utils){
     // dumfries
     var p = [-3.607, 55.072];
 
-    map.setDefaultLonLat(-3.162, 55.944);
+    map.setDefaultLonLat(p[0], p[1]);
 
     var clusters;
     require(['config'], function(config){
