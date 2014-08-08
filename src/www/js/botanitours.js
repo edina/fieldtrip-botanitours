@@ -48,8 +48,9 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
     /**
      * Execute sql and show results as markers.
      * @param sql The sql select statement.
+     * @param pan Should map pan to closest record?
      */
-    var showRecordsBySQL = function(sql){
+    var showRecordsBySQL = function(sql, pan){
         console.debug(sql);
 
         if(db === undefined){
@@ -101,8 +102,10 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
                 if(results.length > 0){
                     map.addLayer(pois);
 
-                    // pan to nearest result
-                    panToClosest(pois.getLayers());
+                    if(pan){
+                        // pan to nearest result
+                        panToClosest(pois.getLayers());
+                    }
                 }
                 else{
                     utils.inform("No results found.");
@@ -154,7 +157,7 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
         $('#poi-filter-popup-ok').on('click', function(e){
             filter.text = $('#poi-filter-text').val().trim();
             $('#poi-filter-popup').popup('close');
-            redrawPoi();
+            redrawPoi(true);
         });
 
         $('#poi-filter-popup-clear').off('click');
@@ -264,8 +267,9 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
 
     /**
      * Redraw points of interest.
+     * @param pan Should map be panned to closest record?
      */
-    var redrawPoi = function(){
+    var redrawPoi = function(pan){
         // Get cached cluster name, based on zoom level and filter.
         var zoomLevel = map.getZoom();
         var clusterName;
@@ -291,10 +295,10 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
 
             console.debug("zoom: " + zoomLevel + " : " + clusterName);
             if(clusterName){
-                showRecords(clusterName);
+                showRecords(clusterName, pan);
             }
             else{
-                showRecordsFromDB();
+                showRecordsFromDB(pan);
             }
         }
     };
@@ -303,7 +307,7 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
      * Show static cluster geojson records on map.
      * @param clusterName
      */
-    var showRecords = function(clusterName){
+    var showRecords = function(clusterName, pan){
         if(lastFetch !== clusterName){
             if(pois){
                 map.removeLayer(pois);
@@ -355,7 +359,9 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
                     }
                 );
 
-                panToClosest(pois.getLayers());
+                if(pan){
+                    panToClosest(pois.getLayers());
+                }
             }, this));
         }
     };
@@ -397,14 +403,15 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
             sql = "SELECT DISTINCT i.positionable_id, AsGeoJSON(i.geometry), i.positionable_type, i.year FROM position_infos i, {0} t WHERE LOWER(t.{1}) LIKE LOWER('%{2}%') AND t.{3} = i.positionable_id AND positionable_type = '{4}'".format(
                 table, filterField, filter.text, joinField, filter.type);
 
-            showRecordsBySQL(sql);
+            showRecordsBySQL(sql, true);
         }
     };
 
     /**
      * Show records from database on map based on map extent.
+     * @param pan Should map be panned to closest record?
      */
-    var showRecordsFromDB = function(){
+    var showRecordsFromDB = function(pan){
         var extent = map.getExtent();
 
         var ne = extent.getNorthEast();
@@ -427,7 +434,12 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
         lastFetch = undefined;
 
         var sql = 'SELECT positionable_id, AsGeoJSON(geometry), positionable_type, year FROM position_infos WHERE ST_Within(geometry, BuildMbr(' + ne.lng + ',' + ne.lat + ',' + sw.lng + ',' + sw.lat + '))';
-        showRecordsBySQL(sql);
+
+        if(filter.type !== 'None'){
+            sql += " AND positionable_type = '" + filter.type + "'";
+        }
+
+        showRecordsBySQL(sql, pan);
     };
 
     /**
@@ -442,14 +454,16 @@ define(['map', 'utils', './leaflet.geometryutil'], function(map, utils, geomUtil
                 return;
             }
 
-            showRecordsFromDB();
+            showRecordsFromDB(false);
         }
     }, this);
 
     /**
      * Map zoom.
      */
-    map.registerZoom(redrawPoi, this);
+    map.registerZoom(function(){
+        redrawPoi(false);
+    }, this);
 
     // edinburgh
     //var p = [-3.162, 55.944];
